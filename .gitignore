@@ -1,0 +1,4 @@
+.env
+logs/
+firebase-service-account.json
+uploads/
