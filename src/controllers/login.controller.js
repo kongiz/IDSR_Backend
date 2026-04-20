@@ -16,9 +16,9 @@ exports.login = async (req, res) => {
 
 
     const userResult = await db.query(
-      `SELECT id, firstname, lastname, email, phone, password,
-              role, region_id, district_id, is_verified
-       FROM users WHERE email = $1`,
+     `SELECT id, firstname, lastname, email, phone, password,
+        role, region_id, district_id, is_verified, is_active
+      FROM users WHERE email = $1`,
       [email.trim().toLowerCase()]
     );
 
@@ -45,6 +45,13 @@ exports.login = async (req, res) => {
         message: "Please verify your email before logging in.",
         requiresVerification: true,
         email: user.email
+      });
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account has been deactivated. Please contact your administrator."
       });
     }
 

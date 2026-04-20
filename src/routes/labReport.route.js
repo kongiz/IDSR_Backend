@@ -4,6 +4,7 @@ const multer        = require("multer");
 const auth          = require("../middleware/auth.middleware");
 const upload        = require("../middleware/upload.middleware");
 const controller    = require("../controllers/labReports.controller");
+const editController = require("../controllers/edit_labReport.controller");
 const getController = require("../controllers/get_labReports.controller");
 const { generalLimiter, reportSubmitLimiter } = require("../middleware/rateLimiter.middleware");
 const { requireRole } = require("../middleware/roleGuard.middleware");
@@ -20,10 +21,10 @@ router.post(
   requireRole("Lab Technician"),
   (req, res, next) => {
     console.log("=== REACHED MULTER ===");
-    upload.single("labResultImage")(req, res, (err) => {
+    upload.array("labResultImage", 10)(req, res, (err) => {
       console.log("=== MULTER DONE === err:", err);
       console.log("=== BODY AFTER MULTER ===", req.body);
-      console.log("=== FILE AFTER MULTER ===", req.file);
+      console.log("=== FILES AFTER MULTER ===", req.files);
       if (err instanceof multer.MulterError) {
         return res.status(400).json({
           success: false,
@@ -47,9 +48,26 @@ router.post(
 
 router.get(
   "/get_labReports",
-  generalLimiter,
+  generalLimiter, 
   auth,
   getController.getLabReports
+);
+
+router.put(
+  "/edit_lab_report/:id",
+  generalLimiter,
+  auth,
+  requireRole("Lab Technician", "Admin"),
+  (req, res, next) => {
+    upload.array("labResultImage", 10)(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        return res.status(400).json({ success: false, message: "File upload error" });
+      }
+      if (err) return res.status(400).json({ success: false, message: err.message });
+      next();
+    });
+  },
+  editController.editLabReport
 );
 
 module.exports = router;

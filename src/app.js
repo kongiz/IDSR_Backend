@@ -16,7 +16,7 @@ const app = express();
 // Security headers — must be first before any other middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }, // allows /uploads to be accessed
-  contentSecurityPolicy: false,  // disable CSP for now — API only, no HTML pages
+  contentSecurityPolicy: false,  
 }));
 
 app.use(cors({
@@ -40,6 +40,9 @@ app.use("/api/v1", require("./routes/adminRegister.routes"));
 app.use("/api/v1", require("./routes/login.routes"));
 app.use("/api/v1/auth", require("./routes/auth.routes"));
 
+// Admin Users
+app.use("/api/v1", require("./routes/admin_user.routes"));
+
 // Location
 app.use("/api/v1", require("./routes/location.routes"));
 app.use("/api/v1", require("./routes/get_healthFacilities.routes"));
@@ -59,6 +62,7 @@ app.use("/api/v1", require("./routes/annex2FImmediateReport.routes"));
 app.use("/api/v1", require("./routes/annex2GLabSpecimen.routes"));
 app.use("/api/v1", require("./routes/reports_count.routes"));
 app.use("/api/v1", require("./routes/analytics.routes"));
+app.use("/api/v1", require("./routes/map.routes"));
 
 
 app.use((req, res) => {

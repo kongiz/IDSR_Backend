@@ -16,7 +16,6 @@ exports.getLabReports = async (req, res) => {
       search
     } = req.query;
 
-
     const userResult = await db.query(
       "SELECT role, region_id, district_id FROM users WHERE id = $1",
       [userId]
@@ -32,7 +31,6 @@ exports.getLabReports = async (req, res) => {
     let params = [];
     let paramIndex = 1;
 
-   
     if (role === "Regional Officer") {
       whereClauses.push(`u.region_id = $${paramIndex++}`);
       params.push(userRegion);
@@ -44,7 +42,6 @@ exports.getLabReports = async (req, res) => {
       params.push(userId);
     }
 
-   
     if (region_id) {
       whereClauses.push(`u.region_id = $${paramIndex++}`);
       params.push(region_id);
@@ -67,21 +64,20 @@ exports.getLabReports = async (req, res) => {
 
     if (search) {
       whereClauses.push(`(
-      lr.lab_name        ILIKE $${paramIndex}
-      OR lr.specimen_type ILIKE $${paramIndex}
-      OR u.firstname || ' ' || u.lastname ILIKE $${paramIndex}
-      OR r.region_name ILIKE $${paramIndex}
-      OR d.district_name ILIKE $${paramIndex}
-     )`);
+        lr.lab_name              ILIKE $${paramIndex}
+        OR lr.specimen_condition ILIKE $${paramIndex}
+        OR u.firstname || ' ' || u.lastname ILIKE $${paramIndex}
+        OR r.region_name         ILIKE $${paramIndex}
+        OR d.district_name       ILIKE $${paramIndex}
+      )`);
       params.push(`%${search}%`);
       paramIndex++;
-      }
+    }
 
     const whereSQL = whereClauses.length
       ? `WHERE ${whereClauses.join(" AND ")}`
       : "";
 
-   
     const dataQuery = `
       SELECT lr.*,
              u.firstname || ' ' || u.lastname AS full_name,
@@ -98,16 +94,20 @@ exports.getLabReports = async (req, res) => {
 
     const dataResult = await db.query(dataQuery, [...params, limit, offset]);
 
-   const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
 
-    const labReports = dataResult.rows.map(row => ({
+    const labReports = dataResult.rows.map(row => {
+      const images = Array.isArray(row.lab_result_images)
+        ? row.lab_result_images.map(img =>
+            `${baseUrl}/${img.replace(/\\/g, "/").replace(/^\/+/, "")}`)
+        : [];
+
+      return {
         ...row,
-        lab_result_image: row.lab_result_image
-            ? `${baseUrl}/${row.lab_result_image.replace(/\\/g, "/").replace(/^\/+/, "")}`
-            : null
-    }));
+        lab_result_images: images
+      };
+    });
 
-   
     const countQuery = `
       SELECT COUNT(*) AS total
       FROM laboratory_reports lr

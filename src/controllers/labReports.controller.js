@@ -7,7 +7,7 @@ const { notifyUser, notifyByRole } = require("../services/notificationFirebase.s
 
 exports.createLabReport = async (req, res) => {
   console.log("=== BODY ===", JSON.stringify(req.body, null, 2));
-  console.log("=== FILE ===", req.file);
+ console.log("=== FILES ===", req.files);
   const client = await pool.connect();
 
   try {
@@ -21,8 +21,8 @@ exports.createLabReport = async (req, res) => {
       return res.status(403).json({ success: false, message: "Admin cannot submit lab reports" });
     }
 
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: "Lab result image is required" });
+    if (!req.files  || req.files.length === 0) {
+      return res.status(400).json({ success: false, message: "At least one lab result image is required" });
     }
 
     const parsed = labReportSchema.safeParse(
@@ -73,7 +73,7 @@ exports.createLabReport = async (req, res) => {
         final_lab_result,
         date_lab_sent_district,
         date_district_received_lab_result,
-        lab_result_image
+        lab_result_images
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING id`,
       [
@@ -87,7 +87,7 @@ exports.createLabReport = async (req, res) => {
         data.finalLabResult,
         data.dateLabSentDistrict,
         data.dateDistrictReceivedLabResult,
-        req.file.path.replace(/\\/g, "/")
+        req.files.map(f => f.path.replace(/\\/g, "/"))
       ]
     );
 

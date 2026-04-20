@@ -15,7 +15,7 @@ exports.getSurveillanceReports = async (req, res) => {
     const offset = (page - 1) * limit;
 
     
-    const { region_id, district_id, search, start_date, end_date } = req.query;
+    const { region_id, district_id, search, start_date, end_date, epiweek } = req.query;
 
     let whereClauses = [];
     let params       = [];
@@ -54,10 +54,17 @@ exports.getSurveillanceReports = async (req, res) => {
       params.push(end_date);
     }
 
+    if (epiweek) {
+      whereClauses.push(`sr.epiweek = $${paramIndex++}`);
+      params.push(epiweek);
+    }
+
+  
     if (search) {
       whereClauses.push(`(
         r.region_name    ILIKE $${paramIndex}
         OR d.district_name ILIKE $${paramIndex}
+        OR sr.epiweek    ILIKE $${paramIndex}
         OR f.facility_name ILIKE $${paramIndex}
         OR u.firstname || ' ' || u.lastname ILIKE $${paramIndex}
       )`);

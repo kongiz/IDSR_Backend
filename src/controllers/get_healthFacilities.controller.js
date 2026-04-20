@@ -20,7 +20,7 @@ exports.getHealthFacilities = async (req, res) => {
     }
 
     const result = await db.query(
-      `SELECT facility_id, facility_name
+      `SELECT facility_id, facility_name, district_id
        FROM health_facilities
        WHERE district_id = $1
        ORDER BY facility_name ASC`,

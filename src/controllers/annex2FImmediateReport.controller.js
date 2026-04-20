@@ -96,12 +96,12 @@ exports.submitImmediateReport = async (req, res) => {
     date_of_onset, travel_history, destination,
     vaccine_doses, date_last_vaccine, date_specimen,
     date_lab, lab_results, outcome, classification,
-    date_facility_notified, date_sent_district, reporter_name
+    date_facility_notified, date_sent_district, reporter_name, caseGeo
   )
   VALUES (
     $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
     $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-    $21,$22,$23,$24,$25,$26,$27,$28,$29
+    $21,$22,$23,$24,$25,$26,$27,$28,$29, $30
   )
   RETURNING id`,
   [
@@ -133,7 +133,8 @@ exports.submitImmediateReport = async (req, res) => {
     data.classification        || null,
     data.dateFacilityNotified,
     data.dateSentDistrict      || null,
-    data.reporterName
+    data.reporterName,
+    data.caseGeo               || null
   ]
 );
 

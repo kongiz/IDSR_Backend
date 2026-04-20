@@ -21,6 +21,7 @@ exports.immediateReportSchema = z.object({
   country:             optionalString,
   province:            optionalString,
   inpatientOutpatient: optionalString,
+  caseGeo:             optionalString,
   patientName:         optionalString,
   address:             optionalString,
   districtAnnex2:      optionalString,
