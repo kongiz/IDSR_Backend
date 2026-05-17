@@ -3,7 +3,8 @@ const { RedisStore } = require("rate-limit-redis");
 const Redis          = require("ioredis");
 const logger         = require("../config/logger");
 
-let redisClient = null;
+let redisClient  = null;
+let redisHealthy = false;
 
 function getRedisClient() {
   if (redisClient) return redisClient;
@@ -13,26 +14,52 @@ function getRedisClient() {
     port:               parseInt(process.env.REDIS_PORT) || 6379,
     password:           process.env.REDIS_PASSWORD || undefined,
     db:                 parseInt(process.env.REDIS_DB)   || 0,
-    retryStrategy:      (times) => Math.min(times * 200, 5000),
-    lazyConnect:        false,
-    enableOfflineQueue: true,  
+    maxRetriesPerRequest: 1,          
+    enableOfflineQueue:   false,     
+    lazyConnect:          true,      
+    retryStrategy: (times) => {
+      if (times > 3) return null;    
+      return Math.min(times * 500, 3000);
+    },
   });
 
-  redisClient.on("connect", () => logger.info("Rate limiter Redis connected"));
-  redisClient.on("error",   (err) => logger.error("Rate limiter Redis error:", { message: err.message }));
-  redisClient.on("close",   () => logger.warn("Rate limiter Redis connection closed"));
+  redisClient.on("connect", () => {
+    redisHealthy = true;
+    logger.info("Rate limiter Redis connected");
+  });
+
+  redisClient.on("error", (err) => {
+    redisHealthy = false;
+    logger.error("Rate limiter Redis error:", err.message);
+  });
+
+  redisClient.on("close", () => {
+    redisHealthy = false;
+    logger.warn("Rate limiter Redis connection closed");
+  });
+
+  
+  redisClient.connect().catch(() => {
+    logger.warn("Rate limiter: Redis unavailable, falling back to memory store");
+  });
 
   return redisClient;
 }
 
-
 getRedisClient();
 
 function makeStore(prefix) {
-  return new RedisStore({
-    sendCommand: (...args) => redisClient.call(...args),
-    prefix:      `rl:${prefix}:`,
-  });
+  if (!redisHealthy) return undefined; 
+
+  try {
+    return new RedisStore({
+      sendCommand: (...args) => redisClient.call(...args),
+      prefix:      `rl:${prefix}:`,
+    });
+  } catch (err) {
+    logger.warn(`Rate limiter: could not create Redis store for "${prefix}", using memory`);
+    return undefined;
+  }
 }
 
 const userOrIpKey = (req) => {

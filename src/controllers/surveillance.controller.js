@@ -3,6 +3,7 @@ const logger = require("../config/logger");
 const { getEpiWeek } = require("../../utils/epiweek.utils");
 const { surveillanceReportSchema } = require("../schemas/Surveillancereport.schema");
 const { notifyUser, notifyByRole } = require("../services/notificationFirebase.service");
+const { audit } = require("../services/audit.service");
 
 
 exports.submitSurveillanceReport = async (req, res) => {
@@ -19,17 +20,18 @@ exports.submitSurveillanceReport = async (req, res) => {
     if (!allowedRoles.includes(user.role)) {
       return res.status(403).json({
         success: false,
-        message: "You are not allowed to submit surveillance reports"
+        message: "You are not allowed to submit surveillance \reports"
       });
     }
 
-    // Zod validation + sanitization
+    // Zod validation with trimming of string fields
     const parsed = surveillanceReportSchema.safeParse(
       Object.fromEntries(
         Object.entries(req.body).map(([k, v]) => [k, typeof v === "string" ? v.trim() : v])
       )
     );
 
+    
     if (!parsed.success) {
       logger.warn("Surveillance validation failed:", { errors: parsed.error.flatten().fieldErrors });
       return res.status(400).json({
@@ -41,11 +43,9 @@ exports.submitSurveillanceReport = async (req, res) => {
 
     const data = parsed.data;
 
-    
     data.region_id   = data.region_id   ?? data.regionId;
     data.district_id = data.district_id ?? data.districtId;
     data.facility_id = data.facility_id ?? data.facilityId;
-
 
     logger.info("Jurisdiction check:", {
       user_region:   user.region_id,
@@ -68,7 +68,6 @@ exports.submitSurveillanceReport = async (req, res) => {
 
     await client.query("BEGIN");
 
-    
     const districtCheck = await client.query(
       `SELECT 1 FROM health_district WHERE district_id = $1 AND region_id = $2`,
       [data.district_id, data.region_id]
@@ -78,7 +77,6 @@ exports.submitSurveillanceReport = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid district for selected region" });
     }
 
-    
     const facilityCheck = await client.query(
       `SELECT 1 FROM health_facilities WHERE facility_id = $1 AND district_id = $2`,
       [data.facility_id, data.district_id]
@@ -88,7 +86,6 @@ exports.submitSurveillanceReport = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid facility for selected district" });
     }
 
-    
     const duplicate = await client.query(
       `SELECT 1 FROM surveillance_reports
        WHERE user_id = $1 AND facility_id = $2 AND epiweek = $3 AND date_from = $4`,
@@ -102,7 +99,6 @@ exports.submitSurveillanceReport = async (req, res) => {
       });
     }
 
-    
     const reportResult = await client.query(
       `INSERT INTO surveillance_reports (
         user_id, region_id, district_id, facility_id,
@@ -134,7 +130,6 @@ exports.submitSurveillanceReport = async (req, res) => {
 
     const reportId = reportResult.rows[0].id;
 
-    // Insert diseases
     for (const dis of data.updatedDiseases) {
       await client.query(
         `INSERT INTO surveillance_diseases (
@@ -163,26 +158,40 @@ exports.submitSurveillanceReport = async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await audit({
+      userId:     user.id,
+      action:     "CREATE",
+      resource:   "SURVEILLANCE_REPORT",
+      resourceId: reportId,
+      ipAddress:  req.ip,
+      userAgent:  req.headers["user-agent"],
+      metadata:   {
+        epiweek:      epiweek,
+        facility_id:  data.facility_id,
+        district_id:  data.district_id,
+        region_id:    data.region_id,
+        disease_count: data.updatedDiseases.length,
+      },
+    });
+
     await Promise.all([
       notifyUser({
         user_id:        user.id,
         title:          "Surveillance Report Submitted",
-        body:           `Your weekly surveillance report has been submitted successfully.`,
+        body:           "Your weekly surveillance report has been submitted successfully.",
         type:           "REPORT_SUBMITTED",
         reference_id:   reportId,
         reference_type: "SURVEILLANCE"
       }),
-
       notifyByRole({
         roles:          ["District Officer", "Regional Officer", "Admin"],
         title:          "New Surveillance Report",
-        body:           `A new weekly surveillance report has been submitted.`,
+        body:           "A new weekly surveillance report has been submitted.",
         type:           "REPORT_SUBMITTED",
         reference_id:   reportId,
         reference_type: "SURVEILLANCE"
       })
     ]);
-
 
     return res.status(201).json({
       success: true,

@@ -1,4 +1,6 @@
 const pool = require("../config/db");
+const { decrypt, hashForLookup } = require("../../utils/encryption");
+const { audit } = require("../services/audit.service");
 
 exports.getSpecimenReports = async (req, res) => {
   const client = await pool.connect();
@@ -7,10 +9,7 @@ exports.getSpecimenReports = async (req, res) => {
     const userId = req.user.id;
 
     if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized"
-      });
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
     const page   = Math.max(1, parseInt(req.query.page)  || 1);
@@ -25,10 +24,7 @@ exports.getSpecimenReports = async (req, res) => {
     );
 
     if (userResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found"
-      });
+      return res.status(404).json({ success: false, message: "User not found" });
     }
 
     const { role, region_id: userRegion, district_id: userDistrict } = userResult.rows[0];
@@ -41,7 +37,6 @@ exports.getSpecimenReports = async (req, res) => {
       return `$${params.length}`;
     };
 
-    
     if (role === "Regional Officer") {
       conditions.push(`u.region_id = ${addParam(userRegion)}`);
     } else if (role === "District Officer") {
@@ -50,24 +45,26 @@ exports.getSpecimenReports = async (req, res) => {
       conditions.push(`ls.user_id = ${addParam(userId)}`);
     }
 
-    
     if (region_id) {
       conditions.push(`u.region_id = ${addParam(parseInt(region_id))}`);
     }
-
     if (district_id) {
       conditions.push(`u.district_id = ${addParam(parseInt(district_id))}`);
     }
-
     if (dateSpecimenCollect) {
       conditions.push(`ls.date_specimen_collect >= ${addParam(dateSpecimenCollect)}`);
     }
 
+    
     if (search) {
-      const term = `%${search.trim()}%`;
-      conditions.push(
-        `(ls.patient_name ILIKE ${addParam(term)} OR ls.specimen_unique_id ILIKE ${addParam(term)})`
-      );
+      const term       = `%${search.trim()}%`;
+      const searchHash = hashForLookup(search);
+      conditions.push(`(
+        ls.patient_name       ILIKE ${addParam(term)}     OR
+        ls.specimen_unique_id ILIKE ${addParam(term)}     OR
+        u.firstname_hash      = ${addParam(searchHash)}   OR
+        u.lastname_hash       = ${addParam(searchHash)}
+      )`);
     }
 
     const where = conditions.length > 0
@@ -76,19 +73,19 @@ exports.getSpecimenReports = async (req, res) => {
 
     const joins = `
       FROM laboratory_report_form_with_specimen ls
-      LEFT JOIN users u           ON ls.user_id     = u.id
-      LEFT JOIN health_regions r  ON u.region_id    = r.region_id
-      LEFT JOIN health_district d ON u.district_id  = d.district_id
+      LEFT JOIN users           u ON ls.user_id    = u.id
+      LEFT JOIN health_regions  r ON u.region_id   = r.region_id
+      LEFT JOIN health_district d ON u.district_id = d.district_id
     `;
 
-    
     const countParams = [...params];
     const dataParams  = [...params, limit, offset];
 
     const dataQuery = `
       SELECT
         ls.*,
-        CONCAT(u.firstname, ' ', u.lastname) AS full_name,
+        u.firstname AS submitted_firstname,
+        u.lastname  AS submitted_lastname,
         r.region_name,
         d.district_name
       ${joins}
@@ -110,6 +107,25 @@ exports.getSpecimenReports = async (req, res) => {
 
     const total = parseInt(countResult.rows[0].total);
 
+   
+    const results = dataResult.rows.map(row => ({
+      ...row,
+      full_name: row.submitted_firstname && row.submitted_lastname
+        ? `${decrypt(row.submitted_firstname)} ${decrypt(row.submitted_lastname)}`
+        : null,
+      submitted_firstname: undefined,
+      submitted_lastname:  undefined,
+    }));
+
+    await audit({
+  userId:    userId,
+  action:    "VIEW",
+  resource:  "SPECIMEN_REPORT",
+  ipAddress: req.ip,
+  userAgent: req.headers["user-agent"],
+  metadata:  { count: results.length, page, filters: { region_id, district_id, dateSpecimenCollect, search } },
+  });
+
     return res.json({
       success: true,
       data: {
@@ -118,17 +134,13 @@ exports.getSpecimenReports = async (req, res) => {
         limit,
         total_records: total,
         total_pages:   Math.ceil(total / limit),
-        results:       dataResult.rows
+        results,
       }
     });
 
   } catch (error) {
     console.error("getSpecimenReports Error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch specimen reports"
-    });
+    return res.status(500).json({ success: false, message: "Failed to fetch specimen reports" });
 
   } finally {
     client.release();

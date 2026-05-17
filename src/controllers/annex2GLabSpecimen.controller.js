@@ -1,5 +1,7 @@
 const pool = require("../config/db");
 const { specimenReportSchema } = require("../schemas/Specimenreport.schema");
+const { audit } = require("../services/audit.service");
+
 
 exports.submitSpecimenReport = async (req, res) => {
   const client = await pool.connect();
@@ -100,6 +102,24 @@ exports.submitSpecimenReport = async (req, res) => {
     );
 
     await client.query("COMMIT");
+
+    // Replace your audit call with:
+await audit({
+  userId:     user.id,
+  action:     "CREATE",
+  resource:   "SPECIMEN_REPORT",
+  resourceId: insertResult.rows[0].id,
+  ipAddress:  req.ip,
+  userAgent:  req.headers["user-agent"],
+  metadata:   {
+    suspected_disease:     data.suspectedDisease,
+    date_specimen_collect: data.dateSpecimenCollect,
+    specimen_unique_id:    data.specimenUniqueID || null,
+  },
+});
+
+
+
 
     return res.status(201).json({
       success: true,

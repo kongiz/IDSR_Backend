@@ -2,12 +2,10 @@ const pool   = require("../config/db");
 const logger = require("../config/logger");
 const { labReportSchema } = require("../schemas/Labreport.schema");
 const { notifyUser, notifyByRole } = require("../services/notificationFirebase.service");
-
+const { audit } = require("../services/audit.service");
 
 
 exports.createLabReport = async (req, res) => {
-  console.log("=== BODY ===", JSON.stringify(req.body, null, 2));
- console.log("=== FILES ===", req.files);
   const client = await pool.connect();
 
   try {
@@ -21,7 +19,7 @@ exports.createLabReport = async (req, res) => {
       return res.status(403).json({ success: false, message: "Admin cannot submit lab reports" });
     }
 
-    if (!req.files  || req.files.length === 0) {
+    if (!req.files || req.files.length === 0) {
       return res.status(400).json({ success: false, message: "At least one lab result image is required" });
     }
 
@@ -36,7 +34,7 @@ exports.createLabReport = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Validation failed",
-        errors: parsed.error.flatten().fieldErrors
+        errors:  parsed.error.flatten().fieldErrors
       });
     }
 
@@ -91,33 +89,48 @@ exports.createLabReport = async (req, res) => {
       ]
     );
 
+    const reportId = insertResult.rows[0].id;
+
     await client.query("COMMIT");
 
+    
+    await audit({
+      userId:     user.id,
+      action:     "CREATE",
+      resource:   "LAB_REPORT",
+      resourceId: reportId,
+      ipAddress:  req.ip,
+      userAgent:  req.headers["user-agent"],
+      metadata:   {
+        lab_name:         data.labName,
+        final_lab_result: data.finalLabResult,
+        image_count:      req.files.length,
+      },
+    });
+
     await Promise.all([
-    notifyUser({
-      user_id:        user.id,
-      title:          "Lab Report Submitted",
-      body:           `Your lab report from ${data.labName} has been submitted successfully.`,
-      type:           "REPORT_SUBMITTED",
-      reference_id:   insertResult.rows[0].id,
-      reference_type: "LAB"
-    }),
-
-    notifyByRole({
-      roles:          ["District Officer", "Regional Officer", "Admin"],
-      title:          "New Lab Report",
-      body:           `A new lab report from ${data.labName} has been submitted. Result: ${data.finalLabResult}.`,
-      type:           "REPORT_SUBMITTED",
-      reference_id:   insertResult.rows[0].id,
-      reference_type: "LAB"
-    })
-  ]);
-
+      notifyUser({
+        user_id:        user.id,
+        title:          "Lab Report Submitted",
+        body:           `Your lab report from ${data.labName} has been submitted successfully.`,
+        type:           "REPORT_SUBMITTED",
+        reference_id:   reportId,
+        reference_type: "LAB"
+      }),
+      notifyByRole({
+        roles:          ["District Officer", "Regional Officer", "Admin"],
+        title:          "New Lab Report",
+        body:           `A new lab report from ${data.labName} has been submitted. Result: ${data.finalLabResult}.`,
+        type:           "REPORT_SUBMITTED",
+        reference_id:   reportId,
+        reference_type: "LAB"
+      })
+    ]);
 
     return res.status(201).json({
       success: true,
       message: "Laboratory report saved successfully",
-      data: { id: insertResult.rows[0].id }
+      data:    { id: reportId }
     });
 
   } catch (error) {

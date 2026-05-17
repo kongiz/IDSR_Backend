@@ -1,5 +1,7 @@
-const pool = require("../config/db");
+const pool   = require("../config/db");
 const logger = require("../config/logger");
+const { decryptUserList, decryptUserFields } = require("../services/userEncryption.service");
+const { hashForLookup }                      = require("../../utils/encryption");
 
 const VALID_ROLES = [
   "Admin",
@@ -46,16 +48,27 @@ exports.getAllUsers = async (req, res) => {
       query += ` AND u.is_active = $${idx++}`;
       params.push(is_active === "true");
     }
+
+   
     if (search) {
-      query += ` AND (u.firstname ILIKE $${idx} OR u.lastname ILIKE $${idx} OR u.email ILIKE $${idx})`;
-      params.push(`%${search}%`);
+      const searchHash = hashForLookup(search);
+      query += ` AND (
+        u.firstname_hash = $${idx}   OR
+        u.lastname_hash  = $${idx}   OR
+        u.email_hash     = $${idx}
+      )`;
+      params.push(searchHash);
       idx++;
     }
 
     query += ` ORDER BY u.created_at DESC`;
 
     const result = await pool.query(query, params);
-    return res.json({ success: true, data: result.rows });
+
+    
+    const users = decryptUserList(result.rows);
+
+    return res.json({ success: true, data: users });
 
   } catch (error) {
     logger.error("getAllUsers Error:", { error: error.message, stack: error.stack });
@@ -66,7 +79,7 @@ exports.getAllUsers = async (req, res) => {
 
 exports.updateUserStatus = async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id }      = req.params;
     const { is_active } = req.body;
 
     if (typeof is_active !== "boolean") {
@@ -83,7 +96,9 @@ exports.updateUserStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    const user = result.rows[0];
+   
+    const user = decryptUserFields(result.rows[0]);
+
     logger.info(`User ${user.id} ${is_active ? "activated" : "deactivated"} by admin`);
 
     return res.json({
@@ -111,7 +126,6 @@ exports.updateUserRole = async (req, res) => {
       });
     }
 
-    
     if (parseInt(id) === req.user.id) {
       return res.status(400).json({ success: false, message: "You cannot change your own role" });
     }
@@ -126,7 +140,9 @@ exports.updateUserRole = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    const user = result.rows[0];
+   
+    const user = decryptUserFields(result.rows[0]);
+
     logger.info(`User ${user.id} role changed to ${role} by admin`);
 
     return res.json({

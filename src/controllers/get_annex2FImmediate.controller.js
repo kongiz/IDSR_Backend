@@ -1,5 +1,7 @@
 const db     = require("../config/db");
 const logger = require("../config/logger");
+const { decrypt, hashForLookup } = require("../../utils/encryption");
+const { audit } = require("../services/audit.service");
 
 exports.getImmediateReports = async (req, res) => {
   try {
@@ -26,7 +28,6 @@ exports.getImmediateReports = async (req, res) => {
       whereClauses.push(`ar.district_id = $${paramIndex++}`);
       params.push(user.district_id);
     } else if (user.role !== "Admin") {
-      // Health Officer — only sees their own reports
       whereClauses.push(`ar.user_id = $${paramIndex++}`);
       params.push(user.id);
     }
@@ -35,37 +36,35 @@ exports.getImmediateReports = async (req, res) => {
       whereClauses.push(`hd.region_id = $${paramIndex++}`);
       params.push(parseInt(region_id));
     }
-
     if (district_id) {
       whereClauses.push(`ar.district_id = $${paramIndex++}`);
       params.push(parseInt(district_id));
     }
-
     if (outcome) {
       whereClauses.push(`ar.outcome = $${paramIndex++}`);
       params.push(outcome);
     }
-
     if (classification) {
       whereClauses.push(`ar.classification = $${paramIndex++}`);
       params.push(classification);
     }
-
     if (date_of_onset) {
-      whereClauses.push(`ar.date_of_onset >= $${paramIndex++}`);  
+      whereClauses.push(`ar.date_of_onset >= $${paramIndex++}`);
       params.push(date_of_onset);
     }
 
     if (search) {
+      const searchHash = hashForLookup(search);
       whereClauses.push(`(
-        u.firstname || ' ' || u.lastname  ILIKE $${paramIndex}
-        OR ar.disease                     ILIKE $${paramIndex}
-        OR ar.reporting_site_name         ILIKE $${paramIndex}
-        OR ar.patient_name                ILIKE $${paramIndex}
-        OR ar.reporter_name               ILIKE $${paramIndex}
+        ar.disease             ILIKE $${paramIndex}   OR
+        ar.reporting_site_name ILIKE $${paramIndex}   OR
+        ar.reporter_name       ILIKE $${paramIndex}   OR
+        ar.patient_name        ILIKE $${paramIndex}   OR
+        u.firstname_hash       = $${paramIndex + 1}   OR
+        u.lastname_hash        = $${paramIndex + 1}
       )`);
-      params.push(`%${search}%`);
-      paramIndex++;
+      params.push(`%${search}%`, searchHash);
+      paramIndex += 2;
     }
 
     const whereSQL     = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
@@ -104,7 +103,8 @@ exports.getImmediateReports = async (req, res) => {
         ar.date_sent_district,
         ar.reporter_name,
         ar.created_at,
-        u.firstname || ' ' || u.lastname AS submitted_by,
+        u.firstname AS submitted_firstname,
+        u.lastname  AS submitted_lastname,
         hr.region_name,
         hd.district_name
       FROM annex2f_immediate_case_reports ar
@@ -134,6 +134,24 @@ exports.getImmediateReports = async (req, res) => {
 
     const total = parseInt(countResult.rows[0].c);
 
+    const data = result.rows.map(row => ({
+      ...row,
+      submitted_by:        row.submitted_firstname && row.submitted_lastname
+        ? `${decrypt(row.submitted_firstname)} ${decrypt(row.submitted_lastname)}`
+        : null,
+      submitted_firstname: undefined,
+      submitted_lastname:  undefined,
+    }));
+
+    await audit({
+  userId:    user.id,
+  action:    "VIEW",
+  resource:  "IMMEDIATE_REPORT",
+  ipAddress: req.ip,
+  userAgent: req.headers["user-agent"],
+  metadata:  { count: data.length, page, filters: { region_id, district_id, outcome, classification, date_of_onset, search } },
+});
+
     return res.json({
       success:       true,
       role:          user.role,
@@ -141,7 +159,7 @@ exports.getImmediateReports = async (req, res) => {
       limit,
       total_records: total,
       total_pages:   Math.ceil(total / limit),
-      data:          result.rows
+      data,
     });
 
   } catch (error) {

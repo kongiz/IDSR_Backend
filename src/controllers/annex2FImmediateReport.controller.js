@@ -2,6 +2,7 @@ const pool = require("../config/db");
 const alertService = require("../services/alert.services");
 const { immediateReportSchema } = require("../schemas/Immediatereport.schema");
 const { notifyUser, notifyByRole } = require("../services/notificationFirebase.service");
+const { audit } = require("../services/audit.service");
 
 exports.submitImmediateReport = async (req, res) => {
    console.log("=== INCOMING BODY ===", JSON.stringify(req.body, null, 2));
@@ -172,6 +173,15 @@ exports.submitImmediateReport = async (req, res) => {
   alertService.notifyRegionalOfficer({ reportId, region_id, disease: data.disease, district_id: data.district }),
   alertService.triggerNationalAlertCheck({ reportId, disease: data.disease, district_id: data.district, region_id })
 ]);
+
+    await audit({
+      userId:     user.id,
+      action:     "CREATE",
+      resource:   "Annex 2F Immediate Report",
+      ipAddress:  req.ip,
+      userAgent:  req.headers["user-agent"],
+      metadata:   { disease: data.disease, district_id: data.district, site: data.site, date_seen: data.dateSeen },
+    });
 
     return res.status(201).json({
       success: true,

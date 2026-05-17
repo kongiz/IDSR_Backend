@@ -137,7 +137,7 @@ async function notifyByRole({ roles, title, body, type, reference_id, reference_
 async function sendWeeklySurveillanceReminder() {
   try {
     const title = "Weekly Surveillance Report Due";
-    const body  = "Please submit your weekly surveillance report before end of day.";
+    const body  = "Please submit your weekly surveillance report before end of the day.";
 
     const userIds = await getUserIdsByRole(["Health Officer"]);
     const tokens  = await getFcmTokensByRole(["Health Officer"]);

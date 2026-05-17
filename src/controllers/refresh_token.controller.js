@@ -2,6 +2,8 @@ const db     = require("../config/db");
 const jwt    = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const logger = require("../config/logger");
+const { randomUUID }        = require("crypto");
+const { decryptUserFields } = require("../services/userEncryption.service");
 
 exports.refreshAccessToken = async (req, res) => {
   try {
@@ -24,7 +26,7 @@ exports.refreshAccessToken = async (req, res) => {
       });
     }
 
-    const userId = decoded.data.id;
+    const userId      = decoded.data.id;
     const tokenResult = await db.query(
       "SELECT refresh_token, expiry FROM user_tokens WHERE user_id = $1",
       [userId]
@@ -46,9 +48,7 @@ exports.refreshAccessToken = async (req, res) => {
       });
     }
 
-  
     const tokenMatch = await bcrypt.compare(refresh_token, storedToken.refresh_token);
-
     if (!tokenMatch) {
       await db.query("DELETE FROM user_tokens WHERE user_id = $1", [userId]);
       logger.warn("Refresh token mismatch — possible reuse attack", { userId });
@@ -57,7 +57,7 @@ exports.refreshAccessToken = async (req, res) => {
         message: "Invalid refresh token. Please log in again."
       });
     }
-    
+
     const userResult = await db.query(
       `SELECT id, firstname, lastname, email, phone, role, region_id, district_id
        FROM users WHERE id = $1`,
@@ -71,14 +71,14 @@ exports.refreshAccessToken = async (req, res) => {
       });
     }
 
-    const user      = userResult.rows[0];
-    const issuedAt  = Math.floor(Date.now() / 1000);
-
+    const user     = decryptUserFields(userResult.rows[0]);
+    const issuedAt = Math.floor(Date.now() / 1000);
 
     const accessExpirySeconds = parseInt(process.env.JWT_EXPIRES_IN) * 60 || 3600;
 
     const newAccessToken = jwt.sign(
       {
+        jti: randomUUID(), 
         iat: issuedAt,
         exp: issuedAt + accessExpirySeconds,
         data: {

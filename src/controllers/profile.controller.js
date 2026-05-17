@@ -1,7 +1,8 @@
 const pool   = require("../config/db");
 const bcrypt = require("bcryptjs");
 const logger = require("../config/logger");
-
+const { decryptUserFields, encryptUserFields } = require("../services/userEncryption.service");
+const { audit } = require("../services/audit.service");
 
 exports.getProfile = async (req, res) => {
   try {
@@ -22,7 +23,19 @@ exports.getProfile = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    return res.json({ success: true, data: result.rows[0] });
+    const user = decryptUserFields(result.rows[0]);
+
+    // Audit log — VIEW profile
+    await audit({
+      userId:     req.user.id,
+      action:     "VIEW",
+      resource:   "USER_PROFILE",
+      resourceId: req.user.id,
+      ipAddress:  req.ip,
+      userAgent:  req.headers["user-agent"],
+    });
+
+    return res.json({ success: true, data: user });
 
   } catch (err) {
     logger.error("getProfile error:", { err: err.message });
@@ -39,12 +52,40 @@ exports.updateProfile = async (req, res) => {
       return res.status(400).json({ success: false, message: "First and last name are required" });
     }
 
+    const encrypted = encryptUserFields({
+      firstname: firstname.trim(),
+      lastname:  lastname.trim(),
+      phone:     phone?.trim() || null,
+    });
+
     await pool.query(
       `UPDATE users 
-       SET firstname = $1, lastname = $2, phone = $3
-       WHERE id = $4`,
-      [firstname.trim(), lastname.trim(), phone?.trim() || null, req.user.id]
+       SET firstname      = $1,
+           lastname       = $2,
+           phone          = $3,
+           firstname_hash = $4,
+           lastname_hash  = $5
+       WHERE id = $6`,
+      [
+        encrypted.firstname,
+        encrypted.lastname,
+        encrypted.phone || null,
+        encrypted.firstname_hash,
+        encrypted.lastname_hash,
+        req.user.id
+      ]
     );
+
+    // Audit log — UPDATE profile
+    await audit({
+      userId:     req.user.id,
+      action:     "UPDATE",
+      resource:   "USER_PROFILE",
+      resourceId: req.user.id,
+      ipAddress:  req.ip,
+      userAgent:  req.headers["user-agent"],
+      metadata:   { fields_updated: ["firstname", "lastname", "phone"] },
+    });
 
     return res.json({ success: true, message: "Profile updated successfully" });
 
@@ -53,6 +94,7 @@ exports.updateProfile = async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
 
 exports.changePassword = async (req, res) => {
   try {
@@ -89,6 +131,16 @@ exports.changePassword = async (req, res) => {
       `UPDATE users SET password = $1 WHERE id = $2`,
       [hashedPassword, req.user.id]
     );
+
+    // Audit log — password change
+    await audit({
+      userId:     req.user.id,
+      action:     "UPDATE",
+      resource:   "USER_PASSWORD",
+      resourceId: req.user.id,
+      ipAddress:  req.ip,
+      userAgent:  req.headers["user-agent"],
+    });
 
     return res.json({ success: true, message: "Password changed successfully" });
 

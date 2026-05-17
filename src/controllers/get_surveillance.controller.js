@@ -1,5 +1,8 @@
 const db     = require("../config/db");
 const logger = require("../config/logger");
+const { decrypt } = require("../../utils/encryption");
+const { hashForLookup } = require("../../utils/encryption");
+const { audit } = require("../services/audit.service");
 
 exports.getSurveillanceReports = async (req, res) => {
   try {
@@ -9,19 +12,16 @@ exports.getSurveillanceReports = async (req, res) => {
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-
     const page   = Math.max(1, parseInt(req.query.page)  || 1);
     const limit  = Math.min(100, parseInt(req.query.limit) || 20);
     const offset = (page - 1) * limit;
 
-    
     const { region_id, district_id, search, start_date, end_date, epiweek } = req.query;
 
     let whereClauses = [];
     let params       = [];
     let paramIndex   = 1;
 
-    
     if (user.role === "Regional Officer") {
       whereClauses.push(`sr.region_id = $${paramIndex++}`);
       params.push(user.region_id);
@@ -33,61 +33,57 @@ exports.getSurveillanceReports = async (req, res) => {
       params.push(user.id);
     }
 
-    
     if (region_id) {
       whereClauses.push(`sr.region_id = $${paramIndex++}`);
       params.push(parseInt(region_id));
     }
-
     if (district_id) {
       whereClauses.push(`sr.district_id = $${paramIndex++}`);
       params.push(parseInt(district_id));
     }
-
     if (start_date) {
       whereClauses.push(`sr.created_at >= $${paramIndex++}`);
       params.push(start_date);
     }
-
     if (end_date) {
       whereClauses.push(`sr.created_at <= $${paramIndex++}`);
       params.push(end_date);
     }
-
     if (epiweek) {
       whereClauses.push(`sr.epiweek = $${paramIndex++}`);
       params.push(epiweek);
     }
 
-  
     if (search) {
+      const searchHash = hashForLookup(search);
       whereClauses.push(`(
-        r.region_name    ILIKE $${paramIndex}
-        OR d.district_name ILIKE $${paramIndex}
-        OR sr.epiweek    ILIKE $${paramIndex}
-        OR f.facility_name ILIKE $${paramIndex}
-        OR u.firstname || ' ' || u.lastname ILIKE $${paramIndex}
+        r.region_name     ILIKE $${paramIndex}   OR
+        d.district_name   ILIKE $${paramIndex}   OR
+        sr.epiweek        ILIKE $${paramIndex}   OR
+        f.facility_name   ILIKE $${paramIndex}   OR
+        u.firstname_hash  = $${paramIndex + 1}   OR
+        u.lastname_hash   = $${paramIndex + 1}
       )`);
-      params.push(`%${search}%`);
-      paramIndex++;
+      params.push(`%${search}%`, searchHash);
+      paramIndex += 2;
     }
 
     const whereSQL     = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
     const filterParams = [...params];
 
-    
     const dataQuery = `
       SELECT
         sr.*,
         r.region_name,
         d.district_name,
         f.facility_name,
-        u.firstname || ' ' || u.lastname AS submitted_by
+        u.firstname AS submitted_firstname,
+        u.lastname  AS submitted_lastname
       FROM surveillance_reports sr
-      LEFT JOIN health_regions   r ON sr.region_id   = r.region_id
-      LEFT JOIN health_district  d ON sr.district_id = d.district_id
+      LEFT JOIN health_regions    r ON sr.region_id   = r.region_id
+      LEFT JOIN health_district   d ON sr.district_id = d.district_id
       LEFT JOIN health_facilities f ON sr.facility_id = f.facility_id
-      LEFT JOIN users            u ON sr.user_id      = u.id
+      LEFT JOIN users             u ON sr.user_id     = u.id
       ${whereSQL}
       ORDER BY sr.id DESC
       LIMIT  $${paramIndex++}
@@ -95,14 +91,13 @@ exports.getSurveillanceReports = async (req, res) => {
     `;
     params.push(limit, offset);
 
-    
     const countQuery = `
       SELECT COUNT(*) AS c
       FROM surveillance_reports sr
-      LEFT JOIN health_regions   r ON sr.region_id   = r.region_id
-      LEFT JOIN health_district  d ON sr.district_id = d.district_id
+      LEFT JOIN health_regions    r ON sr.region_id   = r.region_id
+      LEFT JOIN health_district   d ON sr.district_id = d.district_id
       LEFT JOIN health_facilities f ON sr.facility_id = f.facility_id
-      LEFT JOIN users            u ON sr.user_id      = u.id
+      LEFT JOIN users             u ON sr.user_id     = u.id
       ${whereSQL}
     `;
 
@@ -111,10 +106,18 @@ exports.getSurveillanceReports = async (req, res) => {
       db.query(countQuery, filterParams)
     ]);
 
-    const reports = reportResult.rows;
-    const total   = parseInt(countResult.rows[0].c);
+    
+    const reports = reportResult.rows.map(row => ({
+      ...row,
+      submitted_by: row.submitted_firstname && row.submitted_lastname
+        ? `${decrypt(row.submitted_firstname)} ${decrypt(row.submitted_lastname)}`
+        : null,
+      submitted_firstname: undefined, 
+      submitted_lastname:  undefined,
+    }));
 
-  
+    const total = parseInt(countResult.rows[0].c);
+
     if (reports.length > 0) {
       const reportIds     = reports.map(r => r.id);
       const diseaseResult = await db.query(
@@ -147,6 +150,15 @@ exports.getSurveillanceReports = async (req, res) => {
       }
     }
 
+    await audit({
+      user_id:    user.id,
+      action:     "VIEW",
+      resource:   "Surveillance Reports",
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent"),
+      metadata:  { counts: reports.length, page, filters: { region_id, district_id, search, start_date, end_date, epiweek } },
+    });
+    
     return res.json({
       success:       true,
       role:          user.role,

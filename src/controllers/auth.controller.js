@@ -1,7 +1,9 @@
-const pool    = require("../config/db");
-const bcrypt  = require("bcrypt");
-const logger  = require("../config/logger");
+const pool       = require("../config/db");
+const bcrypt     = require("bcrypt");
+const logger     = require("../config/logger");
 const otpService = require("../services/otp.service");
+const { hashForLookup }     = require("../../utils/encryption");
+const { decryptUserFields } = require("../services/userEncryption.service");
 
 
 exports.resendVerificationOtp = async (req, res) => {
@@ -9,16 +11,17 @@ exports.resendVerificationOtp = async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: "Email is required" });
 
-    const result = await pool.query(
-      `SELECT id, firstname, is_verified FROM users WHERE email = $1`,
-      [email.trim().toLowerCase()]
+    const emailHash = hashForLookup(email);
+    const result    = await pool.query(
+      `SELECT id, firstname, is_verified FROM users WHERE email_hash = $1`,
+      [emailHash]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: "Account not found" });
     }
 
-    const user = result.rows[0];
+    const user          = decryptUserFields(result.rows[0]);
 
     if (user.is_verified) {
       return res.status(400).json({ success: false, message: "Email is already verified" });
@@ -43,16 +46,17 @@ exports.verifyEmail = async (req, res) => {
       return res.status(400).json({ success: false, message: "Email and OTP are required" });
     }
 
-    const result = await pool.query(
-      `SELECT id FROM users WHERE email = $1`,
-      [email.trim().toLowerCase()]
+    const emailHash = hashForLookup(email);
+    const result    = await pool.query(
+      `SELECT id FROM users WHERE email_hash = $1`,
+      [emailHash]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: "Account not found" });
     }
 
-    const userId = result.rows[0].id;
+    const userId      = result.rows[0].id;
     const verification = await otpService.verifyOtp(userId, otp, "EMAIL_VERIFY");
 
     if (!verification.valid) {
@@ -78,17 +82,18 @@ exports.forgotPassword = async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: "Email is required" });
 
-    const result = await pool.query(
-      `SELECT id, firstname FROM users WHERE email = $1`,
-      [email.trim().toLowerCase()]
+    const emailHash = hashForLookup(email);
+    const result    = await pool.query(
+      `SELECT id, firstname FROM users WHERE email_hash = $1`,
+      [emailHash]
     );
 
-   
+    // Always return same message to prevent email enumeration
     if (result.rows.length === 0) {
       return res.json({ success: true, message: "If this email exists, a reset code has been sent" });
     }
 
-    const user = result.rows[0];
+    const user = decryptUserFields(result.rows[0]);
     await otpService.sendPasswordResetOtp(user.id, email, user.firstname);
 
     return res.json({ success: true, message: "Password reset code sent to your email" });
@@ -108,9 +113,10 @@ exports.verifyResetOtp = async (req, res) => {
       return res.status(400).json({ success: false, message: "Email and OTP are required" });
     }
 
-    const result = await pool.query(
-      `SELECT id FROM users WHERE email = $1`,
-      [email.trim().toLowerCase()]
+    const emailHash = hashForLookup(email);
+    const result    = await pool.query(
+      `SELECT id FROM users WHERE email_hash = $1`,
+      [emailHash]
     );
 
     if (result.rows.length === 0) {
@@ -118,7 +124,6 @@ exports.verifyResetOtp = async (req, res) => {
     }
 
     const userId = result.rows[0].id;
-
 
     const userOtp = await pool.query(
       `SELECT otp_code, otp_expires_at, otp_type FROM users WHERE id = $1`,
@@ -145,7 +150,7 @@ exports.verifyResetOtp = async (req, res) => {
   }
 };
 
-// ── reset password ────────────────────────────────────────────────────────────
+
 exports.resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
@@ -158,19 +163,19 @@ exports.resetPassword = async (req, res) => {
       return res.status(400).json({ success: false, message: "Password must be at least 8 characters" });
     }
 
-    const result = await pool.query(
-      `SELECT id FROM users WHERE email = $1`,
-      [email.trim().toLowerCase()]
+    const emailHash = hashForLookup(email);
+    const result    = await pool.query(
+      `SELECT id FROM users WHERE email_hash = $1`,
+      [emailHash]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: "Account not found" });
     }
 
-    const userId = result.rows[0].id;
-
-    // verify OTP one final time and clear it
+    const userId      = result.rows[0].id;
     const verification = await otpService.verifyOtp(userId, otp, "PASSWORD_RESET");
+
     if (!verification.valid) {
       return res.status(400).json({ success: false, message: verification.message });
     }

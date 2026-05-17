@@ -1,38 +1,64 @@
-const express = require("express");
-const cors    = require("cors");
-const helmet  = require("helmet"); 
-const sanitize = require("./middleware/sanitize.middleware"); 
+const express      = require("express");
+const cors         = require("cors");
+const helmet       = require("helmet");
+const sanitize     = require("./middleware/sanitize.middleware");
+const logger       = require("./config/logger");
+const { globalLimiter } = require("./middleware/rateLimiter.middleware");
+const requestLogger     = require("./middleware/requestLogger");
+const httpsEnforce      = require("./middleware/httpsEnforce.middleware");
+const { verifyToken } = require("./middleware/auth.middleware");
+const { serveProtectedUpload } = require("./middleware/protectedUploads.middleware");
+
 require("./config/db");
 
+// Start background jobs
 const { startReminderJob } = require("./jobs/reminderJob");
 startReminderJob();
 
-const logger                         = require("./config/logger");
-const { globalLimiter }              = require("./middleware/rateLimiter.middleware");
-const requestLogger                  = require("./middleware/requestLogger");
+// Load allowed origins from environment variable
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map(o => o.trim())
+  .filter(Boolean);
 
 const app = express();
 
-// Security headers — must be first before any other middleware
+app.set("trust proxy", 1);
+
+// Enforce HTTPS in production
+app.use(httpsEnforce);
+
+// Security headers with Helmet
 app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }, // allows /uploads to be accessed
-  contentSecurityPolicy: false,  
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: false,
 }));
 
+// CORS configuration with dynamic origin checking
 app.use(cors({
-  origin:         "*",
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      logger.warn("CORS blocked request", { origin });
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   methods:        ["GET", "POST", "PUT", "DELETE", "PATCH"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials:    true,
 }));
-app.use(express.json());
+
+// Body parser with size limit and sanitization
+app.use(express.json({ limit: "10mb" }));
 app.use(sanitize);
-app.use(globalLimiter); 
+
+app.use(globalLimiter);
 
 app.use(requestLogger);
 
-
-app.use("/uploads", express.static("./uploads"));
-
+// Serve protected uploads with authentication
+app.use("/uploads", verifyToken, serveProtectedUpload);
 
 // Auth & Users
 app.use("/api/v1", require("./routes/signup.routes"));
@@ -68,7 +94,7 @@ app.use("/api/v1", require("./routes/map.routes"));
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: `Route ${req.method} ${req.originalUrl} not found`
+    message: `Route ${req.method} ${req.originalUrl} not found`,
   });
 });
 
@@ -77,7 +103,7 @@ app.use((err, req, res, next) => {
   logger.error("Unhandled Error:", { error: err.message, stack: err.stack });
   res.status(500).json({
     success: false,
-    message: "An unexpected error occurred"
+    message: "An unexpected error occurred",
   });
 });
 
