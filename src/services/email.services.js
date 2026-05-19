@@ -1,33 +1,16 @@
-const nodemailer = require("nodemailer");
-
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false, 
-  family: 4,
-  auth: {
-    user: process.env.ALERT_EMAIL,
-    pass: process.env.ALERT_EMAIL_PASSWORD
-  }
-});
-
-transporter.verify((error) => {
-  if (error) {
-    console.error("Email transporter error:", error.message);
-  } else {
-    console.log("Email transporter ready");
-  }
-});
+const { Resend } = require("resend");
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 exports.sendEmail = async ({ to, subject, text }) => {
   try {
-    const info = await transporter.sendMail({
-      from: `"IDSR System" <${process.env.ALERT_EMAIL}>`,
+    const { error } = await resend.emails.send({
+      from: "IDSR Alert System <onboarding@resend.dev>",
       to,
       subject,
       text
     });
-    console.log("Email sent:", info.messageId);
+    if (error) throw new Error(error.message);
+    console.log("Email sent successfully");
     return true;
   } catch (error) {
     console.error("Email Error:", error.message);
