@@ -1,12 +1,7 @@
 const Redis  = require("ioredis");
 const logger = require("../config/logger");
 
-const redis = new Redis({
-  host:     process.env.REDIS_HOST     || "127.0.0.1",
-  port:     parseInt(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
-  db:       parseInt(process.env.REDIS_DB)   || 0,
-});
+const redis = new Redis(process.env.REDIS_URL || "redis://127.0.0.1:6379");
 
 const MAX_ATTEMPTS   = 5;
 const LOCKOUT_TTL    = 15 * 60; // 15 minutes in seconds

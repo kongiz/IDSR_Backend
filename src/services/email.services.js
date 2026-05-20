@@ -1,15 +1,19 @@
-const { Resend } = require("resend");
-const resend = new Resend(process.env.RESEND_API_KEY);
+const Brevo = require("@getbrevo/brevo");
+
+const client = Brevo.ApiClient.instance;
+client.authentications["api-key"].apiKey = process.env.BREVO_API_KEY;
+
+const transactionalApi = new Brevo.TransactionalEmailsApi();
 
 exports.sendEmail = async ({ to, subject, text }) => {
   try {
-    const { error } = await resend.emails.send({
-      from: "IDSR Alert System <onboarding@resend.dev>",
-      to,
-      subject,
-      text
-    });
-    if (error) throw new Error(error.message);
+    const email = new Brevo.SendSmtpEmail();
+    email.sender = { name: "IDSR Alert System", email: process.env.ALERT_EMAIL };
+    email.to = [{ email: to }];
+    email.subject = subject;
+    email.textContent = text;
+
+    await transactionalApi.sendTransacEmail(email);
     console.log("Email sent successfully");
     return true;
   } catch (error) {

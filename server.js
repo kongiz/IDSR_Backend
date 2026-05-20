@@ -1,6 +1,10 @@
 require("dotenv").config();
 require("./src/config/env"); 
 
+console.log("REDIS_HOST:", process.env.REDIS_HOST);
+console.log("REDIS_PORT:", process.env.REDIS_PORT);
+console.log("REDIS_PASSWORD:", process.env.REDIS_PASSWORD ? "SET" : "NOT SET");
+
 const app = require("./src/app");
 
 const PORT = process.env.PORT || 5000;
