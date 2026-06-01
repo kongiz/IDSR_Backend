@@ -10,7 +10,7 @@ const ALLOWED_ROLES = [
 exports.selfRegisterSchema = z.object({
   firstname:   z.string().min(1, "First name is required"),
   lastname:    z.string().min(1, "Last name is required"),
-  phone:       z.string().regex(/^[0-9]{8,10}$/, "Phone number must be 8-10 digits"),
+  phone: z.string().regex(/^[0-9]{7,10}$/, "Phone number must be 7-10 digits"),
   email:       z.string().email("Invalid email format"),
   gender:      z.enum(["Male", "Female", "Other"], {
                  errorMap: () => ({ message: "Gender must be Male, Female, or Other" })

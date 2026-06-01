@@ -55,6 +55,9 @@ exports.getAllUsers = async (req, res) => {
       query += ` AND (
         u.firstname_hash = $${idx}   OR
         u.lastname_hash  = $${idx}   OR
+        u.role       = $${idx}   OR
+        u.region_id  = $${idx}   OR
+        u.district_id= $${idx}   OR
         u.email_hash     = $${idx}
       )`;
       params.push(searchHash);
