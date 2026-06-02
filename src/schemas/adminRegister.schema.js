@@ -20,7 +20,7 @@ exports.adminRegisterSchema = z.object({
                  }),
 
   // Optional
-  phone:       z.string().regex(/^[0-9]{8,10}$/, "Phone number must be 8-10 digits").optional(),
+  phone:       z.string().regex(/^[0-9]{7,10}$/, "Phone number must be 7-10 digits").optional(),
   gender:      z.enum(["Male", "Female", "Other"], {
                  errorMap: () => ({ message: "Gender must be Male, Female, or Other" })
                }).optional(),
