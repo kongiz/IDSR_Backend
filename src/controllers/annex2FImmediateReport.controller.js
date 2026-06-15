@@ -5,7 +5,6 @@ const { notifyUser, notifyByRole } = require("../services/notificationFirebase.s
 const { audit } = require("../services/audit.service");
 
 exports.submitImmediateReport = async (req, res) => {
-   console.log("=== INCOMING BODY ===", JSON.stringify(req.body, null, 2));
   const client = await pool.connect();
 
   try {
