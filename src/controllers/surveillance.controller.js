@@ -186,7 +186,7 @@ exports.submitSurveillanceReport = async (req, res) => {
       notifyByRole({
         roles:          ["District Officer", "Regional Officer", "Admin"],
         title:          "New Surveillance Report",
-        body:           "A new weekly surveillance report has been submitted.",
+        body:           `A new weekly surveillance report from ${data.facility_id} has been submitted.`,
         type:           "REPORT_SUBMITTED",
         reference_id:   reportId,
         reference_type: "SURVEILLANCE"
